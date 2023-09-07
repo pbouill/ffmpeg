@@ -369,6 +369,8 @@ class FFmpeg:
 
         if inplace:
             output_path.replace(self.input_path)
+  
+
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
