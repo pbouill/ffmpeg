@@ -1,18 +1,21 @@
 from pathlib import Path
-from enum import Enum, StrEnum, auto
+from enum import Enum, auto
 from datetime import datetime, timedelta
 import re
-from io import TextIOWrapper
 import json
 import subprocess
-from typing import Any
-from dataclasses import dataclass
+# from typing import Any
+# from dataclasses import dataclass
 import yaml
 import logging
 import warnings
 
 from tqdm import TqdmExperimentalWarning
 from tqdm.rich import tqdm_rich
+
+from ffmpeg.chapters import Chapter
+from ffmpeg.encoders import VideoEncoders
+from ffmpeg.file_extensions import VideoExtensions
 
 warnings.filterwarnings('ignore', category=TqdmExperimentalWarning)
 
@@ -21,9 +24,15 @@ logger = logging.getLogger(__name__)
 def get_timedelta(time_str: str, str_format='%H:%M:%S.%f'):
     t = datetime.strptime(time_str, str_format)
     return timedelta(hours=t.hour, minutes=t.minute, seconds=t.second, microseconds=t.microsecond)
-    
+
 
 class FFmpeg:
+    DEFAULT_TGT_EXT = VideoExtensions.MP4
+    DEFAULT_TGT_CODEC = VideoEncoders.LIBX265
+
+    CONVERT_SUFFIX = '-converted'
+    CHAPTERS_SUFFIX = '-chapters'
+    
     REGEX_NUMBER_GROUP = '([+-]?[0-9]*[.]?[0-9]*)'
     REGEX_TIME_GROUP = '([0-9]{2}:[0-9]{2}:[0-9]{2}[.[0-9]*]?)'
     REGEX_DURATION = re.compile(
@@ -41,66 +50,14 @@ class FFmpeg:
     REGEX_FRAME = re.compile(
         r'frame=[ ]*' + REGEX_NUMBER_GROUP
     )
+
+    
     FFMETADATA_HEADER = ';FFMETADATA1'
-    CHAPTER_TAG = 'CHAPTER'
     CHAPTER_TS_FORMAT = '%H:%M:%S'
 
     class ProgressMetric(Enum):
         FRAMES = auto()
         TIME = auto()
-
-
-    class VideoEncoders(StrEnum):
-        # others exist... "ffmpeg -encoders"
-        FLV = auto()  # FLV / Sorenson Spark / Sorenson H.263 (Flash Video) (codec flv1)
-        GIF = auto()  # GIF (Graphics Interchange Format)
-        LIBX264 = auto()  # libx264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (codec h264)
-        LIBX265 = auto()  # libx265 H.265 / HEVC (codec hevc)
-        LJPEG = auto()  # Lossless JPEG
-        MJPEG = auto()  # MJPEG (Motion JPEG)
-        MPEG4 = auto()  # MPEG-4 part 2
-        LIBXVID = auto()  # libxvidcore MPEG-4 part 2 (codec mpeg4)
-        PNG = auto()  # PNG (Portable Network Graphics) image
-        PRORES = auto()  # Apple ProRes
-        RAWVIDEO = auto()  # raw video
-        RPZA = auto()  # QuickTime video (RPZA)
-        TIFF = auto()  # TIFF image
-        WBMP = auto()  # WBMP (Wireless Application Protocol Bitmap) image
-        LIBWEBP = auto()  # libwebp WebP image (codec webp)
-        WMV2 = auto()  # Windows Media Video 8
-        ZMBV = auto()  # Zip Motion Blocks Video
-    
-    class VideoExtensions(StrEnum):
-        # others exist... "ffmpeg -muxers"
-        AVI = auto()
-        FLV = auto()
-        M4V = auto()
-        MKV = auto()
-        MOV = auto()
-        MP4 = auto()
-        WEBM = auto()
-
-
-    @dataclass
-    class Chapter:
-        start: timedelta = None
-        end: timedelta = None
-        title: str = None
-        timebase: int = 1000
-
-        def get_ini_dict(self) -> dict[str, Any]:
-            return {
-                'TIMEBASE': f'1/{self.timebase}',
-                'START': int(self.start.total_seconds()*self.timebase),
-                'END': int(self.end.total_seconds()*self.timebase),
-                'title': self.title
-            }
-        
-        def write_ini_section(self, f: TextIOWrapper):
-            f.write(f'\n[CHAPTER]')
-            for k, v in self.get_ini_dict().items():
-                f.write(f'\n{k}={v}')
-            f.write('\n')
 
     @classmethod
     def add_chapters_from_yaml(cls, yaml_path: Path, overwrite: bool = False, inplace: bool = False):
@@ -114,16 +71,124 @@ class FFmpeg:
             for ts_str, ts_timedelta in ts_map.items():
                 chapter_data[ts_timedelta] = chapter_data.pop(ts_str)
 
-            ff = FFmpeg(input_path=Path(video), chapter_data=chapter_data)
-            ff.update_file_metadata(overwrite=overwrite, inplace=inplace)
+            input_path = Path(video)
+            if input_path.exists():
+                ff = FFmpeg(input_path=input_path, chapter_data=chapter_data)
+                ff.write_chapters(overwrite=overwrite, inplace=inplace)
+            else:
+                logger.warning(f'skipping chapter information for file: {input_path}. File does not exist.')
 
     @classmethod
-    def find_videos(cls, videos_path: Path | str, extensions: list[VideoExtensions] = VideoExtensions, stem_filter_str: str = '*'):
-        if isinstance(videos_path, str):
-            videos_path = Path(videos_path)
+    def convert_set(
+        cls, 
+        input_paths: set[Path], 
+        output_dir_path: Path = None, 
+        extension: VideoExtensions = None,
+        overwrite: bool = None,
+        vcodec: VideoEncoders = None,
+        crf: int = None,
+        fps: int = None,
+        width: int = None,
+        height: int = None,
+        progress_metric: ProgressMetric = None
+    ):
+        for input_path in input_paths:
+            ff = FFmpeg(input_path=input_path)
+
+            if extension is None:
+                extension = input_path.suffix
+
+            if output_dir_path is not None:
+                if isinstance(output_dir_path, str):
+                    output_dir_path = Path(output_dir_path)
+                if output_dir_path.resolve() == input_path.parent.resolve():
+                    if extension == input_path.suffix:
+                        output_path = None  # use default file name suffix
+                    else:
+                        output_path = input_path.with_name(f'{input_path.stem}.{extension}')
+                else:
+                    output_path = output_dir_path.joinpath(f'{input_path.stem}.{extension}')
+            else:
+                if extension == input_path.suffix:
+                    output_path = None  # use default file name suffix
+                else:
+                    output_path = input_path.with_name(f'{input_path.stem}.{extension}')
+
+            convert_kwargs = dict()  # passing only what we have allows us to use defaults at the convert func
+            if overwrite is not None:
+                convert_kwargs['overwrite'] = overwrite
+            if vcodec is not None:
+                convert_kwargs['vcodec'] = vcodec
+            if crf is not None:
+                convert_kwargs['crf'] = crf
+            if fps is not None:
+                convert_kwargs['fps'] = fps
+            if width is not None:
+                convert_kwargs['width'] = width
+            if height is not None:
+                convert_kwargs['height'] = height
+            if progress_metric is not None:
+                convert_kwargs['progress_metric'] = progress_metric
+            
+            ff.convert(output_path=output_path, **convert_kwargs)
+
+    @classmethod
+    def find_uncoverted(cls, videos_dir_path: Path | str, convert_suffix: str = CONVERT_SUFFIX) -> set[Path]:
+        all_vids = cls.find_videos(videos_dir_path=videos_dir_path)  # first get everything
+        converted_vids = cls.find_videos(videos_dir_path=videos_dir_path, stem_filter_str=f'*{convert_suffix}')  # find the ones that are "converted"
+        all_original_vids = all_vids.difference(converted_vids)  # only consider original/non-converted videos
+
+        originals_converted = set()
+        for cv in converted_vids:  # loop over the converted vids to remove the originals from the set
+            for ov in all_original_vids:
+                if cv.stem.startswith(ov.stem):
+                    originals_converted.add(ov)
+                    break
+
+        return all_original_vids.difference(originals_converted)  # return the set of originals not previously converted
+    
+    @classmethod
+    def convert_all(
+        cls, 
+        videos_dir_path: Path, 
+        output_dir_path: Path = None, 
+        extension: VideoExtensions = None,
+        overwrite: bool = None,
+        vcodec: VideoEncoders = None,
+        crf: int = None,
+        fps: int = None,
+        width: int = None,
+        height: int = None,
+        progress_metric: ProgressMetric = None
+    ):
+        target_files = cls.find_uncoverted(videos_dir_path=videos_dir_path)
+
+        convert_kwargs = dict()  # passing only what we have allows us to use defaults at the convert func
+        if output_dir_path is not None:
+            convert_kwargs['output_dir_path'] = output_dir_path
+        if overwrite is not None:
+            convert_kwargs['overwrite'] = overwrite
+        if vcodec is not None:
+            convert_kwargs['vcodec'] = vcodec
+        if crf is not None:
+            convert_kwargs['crf'] = crf
+        if fps is not None:
+            convert_kwargs['fps'] = fps
+        if width is not None:
+            convert_kwargs['width'] = width
+        if height is not None:
+            convert_kwargs['height'] = height
+        if progress_metric is not None:
+            convert_kwargs['progress_metric'] = progress_metric
+        cls.convert_set(input_paths=target_files, **convert_kwargs)
+
+    @classmethod
+    def find_videos(cls, videos_dir_path: Path | str, extensions: list[VideoExtensions] = VideoExtensions, stem_filter_str: str = '*') -> set[Path]:
+        if isinstance(videos_dir_path, str):
+            videos_dir_path = Path(videos_dir_path)
         paths = set()
         for ext in extensions:
-            for f in videos_path.glob(f'{stem_filter_str}.{ext}'):
+            for f in videos_dir_path.glob(f'{stem_filter_str}.{ext}'):
                 paths.add(f)
         return paths
 
@@ -195,8 +260,8 @@ class FFmpeg:
         return json.loads(out.decode('utf-8'))
     
 
-    def __init__(self, input_path: Path, chapter_data: dict[timedelta, str]):
-        self.chapters: dict[timedelta, self.Chapter] = dict()
+    def __init__(self, input_path: Path, chapter_data: dict[timedelta, str] = {}):
+        self.chapters: dict[timedelta, Chapter] = dict()
         self.__info: dict = None
         self.input_path = input_path
 
@@ -266,24 +331,27 @@ class FFmpeg:
                 break
 
     def convert(
-            self, 
-            output_path: Path = None, 
-            overwrite: bool = False, 
-            vcodec: VideoEncoders | str = VideoEncoders.LIBX265, 
-            crf: int = 35,
-            fps: int = None,
-            width: int = None, 
-            height: int=None,
-            progress_metric: ProgressMetric = None
-        ):
+        self, 
+        output_path: Path = None, 
+        overwrite: bool = False, 
+        vcodec: VideoEncoders | str = VideoEncoders.LIBX265, 
+        crf: int = 35,
+        fps: int = None,
+        width: int = None, 
+        height: int=None,
+        progress_metric: ProgressMetric = None
+    ):
         cmd = self.get_base_ffmpeg_cmd(overwrite=overwrite, input_path=self.input_path)
+
+        if output_path is None:
+            output_path = self.input_path.with_stem(f'{self.input_path.stem}{self.CONVERT_SUFFIX}')
         suffix = f'"{output_path.as_posix()}'
 
         kwargs = dict()
         
         if not isinstance(vcodec, str):
             vcodec = vcodec.value()
-        kwargs['c:v'] = vcodec.value()
+        kwargs['c:v'] = vcodec
 
         if crf is not None:
             kwargs['crf'] = crf
@@ -319,10 +387,10 @@ class FFmpeg:
         for chapter_ts, chapter_title in dict(sorted(chapter_data.items())).items():  # iterate over the chapter items from first to last ts
             if isinstance(chapter_ts, str):
                 chapter_ts = get_timedelta(time_str=chapter_ts)
-            if isinstance(chapter, self.Chapter):
+            if isinstance(chapter, Chapter):
                 chapter.end = chapter_ts  # add the previous chapter end ts
                 self.add_chapter(chapter=chapter)
-            chapter = self.Chapter(start=chapter_ts, title=chapter_title)
+            chapter = Chapter(start=chapter_ts, title=chapter_title)
         if chapter is not None:
             chapter.end = self.total_duration  # very last chapter can be added with end_ts as the total duration
             self.add_chapter(chapter=chapter)
@@ -335,10 +403,10 @@ class FFmpeg:
         with self.metadata_file.open('w') as f:
             f.write(f'{self.FFMETADATA_HEADER}\n')
             for c in self.chapters.values():
-                if isinstance(c, self.Chapter):
+                if isinstance(c, Chapter):
                     c.write_ini_section(f=f)
     
-    def update_file_metadata(
+    def write_chapters(
             self, 
             output_path: Path = None,
             overwrite: bool = False,
@@ -352,7 +420,7 @@ class FFmpeg:
                 overwrite = True
                 output_path = self.input_path.with_stem(f'{self.input_path.stem}.tmp')
             else:
-                output_path = self.input_path.with_stem(f'{self.input_path.stem}-chapters')
+                output_path = self.input_path.with_stem(f'{self.input_path.stem}{self.CHAPTERS_SUFFIX}')
         
         cmd = self.get_base_ffmpeg_cmd(overwrite=overwrite, input_path=self.input_path)
 
@@ -374,4 +442,7 @@ class FFmpeg:
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
-    FFmpeg.add_chapters_from_yaml(yaml_path=Path('events.yaml'), overwrite=True, inplace=True)
+    test_dir = 'D:\\OD Video Files\\2490L Shaft Station'
+    test_path = Path(test_dir)
+    FFmpeg.convert_all(videos_dir_path=test_path)
+    
