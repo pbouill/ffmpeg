@@ -4,8 +4,6 @@ from datetime import datetime, timedelta
 import re
 import json
 import subprocess
-# from typing import Any
-# from dataclasses import dataclass
 import yaml
 import logging
 import warnings
@@ -60,7 +58,9 @@ class FFmpeg:
         TIME = auto()
 
     @classmethod
-    def add_chapters_from_yaml(cls, yaml_path: Path, overwrite: bool = False, inplace: bool = False):
+    def add_chapters_from_yaml(cls, yaml_path: Path | str, overwrite: bool = False, inplace: bool = False):
+        if isinstance(yaml_path, str):
+            yaml_path = Path(yaml_path)
         with yaml_path.open('r') as f:
             data = yaml.safe_load(f)
         for video, chapter_data in data.items():
@@ -71,7 +71,7 @@ class FFmpeg:
             for ts_str, ts_timedelta in ts_map.items():
                 chapter_data[ts_timedelta] = chapter_data.pop(ts_str)
 
-            input_path = Path(video)
+            input_path = yaml_path.with_name(video)
             if input_path.exists():
                 ff = FFmpeg(input_path=input_path, chapter_data=chapter_data)
                 ff.write_chapters(overwrite=overwrite, inplace=inplace)
@@ -377,7 +377,6 @@ class FFmpeg:
         self.show_progress(proc=proc, progress_metric=progress_metric)
 
     def add_chapter(self, chapter: Chapter):
-        print(f'adding chapter: {chapter}')
         key = chapter.start
         self.chapters[key] = chapter
         return key
@@ -444,5 +443,6 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
     test_dir = 'D:\\OD Video Files\\2490L Shaft Station'
     test_path = Path(test_dir)
-    FFmpeg.convert_all(videos_dir_path=test_path)
+    # FFmpeg.convert_all(videos_dir_path=test_path)
+    FFmpeg.add_chapters_from_yaml(yaml_path=test_path.joinpath('events.yaml'), inplace=True)
     
