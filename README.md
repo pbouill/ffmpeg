@@ -10,7 +10,7 @@ Ensure ffmpeg is accessible in your PATH.
   ```
   or via command line:
   ```
-  set PATH=%PATH%;{PATH_TO_YOUR_FFMPEG_DIR}
+  set PATH=%PATH%;path/to/your/ffmpeg
   ```
   - click
 - ensure the executable is accessible:
