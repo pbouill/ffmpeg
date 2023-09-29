@@ -1,5 +1,5 @@
 # ffmpeg
-Simple python bindings for ffmpeg with progress metrics (tqdm).
+Simple python bindings for ffmpeg using subprocess and progress metrics (tqdm).
 
 # Setup
 Ensure ffmpeg is accessible in your PATH.
@@ -12,7 +12,6 @@ Ensure ffmpeg is accessible in your PATH.
   ```
   set PATH=%PATH%;path/to/your/ffmpeg
   ```
-  - click
 - ensure the executable is accessible:
   ```
   ffmpeg -version
