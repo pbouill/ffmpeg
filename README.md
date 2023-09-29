@@ -16,6 +16,10 @@ Ensure ffmpeg is accessible in your PATH.
   ```
   ffmpeg -version
   ```
+- install this ffmpeg package with pip:
+  ```
+  pip install git+https://github.com/pbouill/ffmpeg.git
+  ```
 
 # Use
 ## Convert videos
