@@ -1,0 +1,27 @@
+[build-system]
+requires = [
+    "setuptools>=68.0",
+    "setuptools-scm>=8.0",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ffmpeg"
+authors = [
+    {name = "Paul Bouillon"},
+]
+description = "Bindings for ffmpeg"
+readme = "README.md"
+requires-python = ">=3.11"
+keywords = ["analytics", "vision", "machine learning", "computer vision"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+]
+
+dynamic = ["dependencies", "version"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools_scm]
+version_file = "ffmpeg/_version.py"

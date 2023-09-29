@@ -39,6 +39,7 @@ class FFmpeg:
     REGEX_BITRATE = re.compile(
         r'bitrate=[ ]*(?P<bitrate>[+-]?[0-9]*[.]?[0-9]*)[ ]*(?P<bitrate_units>.*\/s)'
     )
+    # e.g. out_time=00:00:05.066667
     REGEX_OUT_TIME = re.compile(
         r'out_time=[ ]*' + REGEX_TIME_GROUP
     )
@@ -301,7 +302,7 @@ class FFmpeg:
             progress_kwargs['total'] = self.total_frames
             progress_kwargs['unit'] = ' frames'
         elif progress_metric is self.ProgressMetric.TIME:
-            progress_kwargs['total'] = self.total_duration
+            progress_kwargs['total'] = self.total_duration.total_seconds()
             progress_kwargs['unit'] = ' s'
         
         desc = progress_kwargs.pop('desc', self.input_path.stem)
@@ -319,7 +320,7 @@ class FFmpeg:
                     frame = int(frame_data.group(1))
                     progress.update(frame - progress.n)
                     continue
-            elif progress_metric is self.ProgressMetric.TIME:           
+            elif progress_metric is self.ProgressMetric.TIME:
                 out_time_data = self.REGEX_OUT_TIME.search(proc_stdout_line)
                 if out_time_data is not None:
                     out_time = get_timedelta(out_time_data.group(1))
@@ -349,9 +350,10 @@ class FFmpeg:
 
         kwargs = dict()
         
-        if not isinstance(vcodec, str):
-            vcodec = vcodec.value()
-        kwargs['c:v'] = vcodec
+        if vcodec is not None:
+            if not isinstance(vcodec, str):
+                vcodec = vcodec.value()
+            kwargs['c'] = vcodec
 
         if crf is not None:
             kwargs['crf'] = crf
@@ -441,8 +443,14 @@ class FFmpeg:
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
-    test_dir = 'D:\\OD Video Files\\2490L Shaft Station'
-    test_path = Path(test_dir)
+    # test_dir = 'D:\\OD Video Files\\2490L Shaft Station'
+    # test_dir = 'C:\\Users\\boui65012\\Downloads\\vids for jen'
+    # test_path = Path(test_dir)
+    # test_vid = test_path.joinpath('2023-05-08_06-00-00-converted.mp4')
+    # ff = FFmpeg(input_path=test_vid)
+    # for fps in [5, 10, 15]:
+    #     of = test_vid.with_name(f'{test_vid.stem}_{fps}FPS.mp4')
+    #     ff.convert(output_path=of, vcodec=VideoEncoders.LIBX265, crf=None, fps=fps, progress_metric=FFmpeg.ProgressMetric.TIME, overwrite=True)
     # FFmpeg.convert_all(videos_dir_path=test_path)
-    FFmpeg.add_chapters_from_yaml(yaml_path=test_path.joinpath('events.yaml'), inplace=True)
+    # FFmpeg.add_chapters_from_yaml(yaml_path=test_path.joinpath('events.yaml'), inplace=True)
     

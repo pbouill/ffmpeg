@@ -2,6 +2,7 @@ from enum import StrEnum, auto
 
 class VideoEncoders(StrEnum):
     # others exist... "ffmpeg -encoders"
+    COPY = auto()
     FLV = auto()  # FLV / Sorenson Spark / Sorenson H.263 (Flash Video) (codec flv1)
     GIF = auto()  # GIF (Graphics Interchange Format)
     LIBX264 = auto()  # libx264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (codec h264)
