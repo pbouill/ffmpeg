@@ -20,6 +20,12 @@ Ensure ffmpeg is accessible in your PATH.
   ```
   pip install git+https://github.com/pbouill/ffmpeg.git
   ```
+  or clone to your local workspace and install the requirements:
+  ```
+  git clone https://github.com/pbouill/ffmpeg.git
+  cd ffmpeg
+  pip install -r requirements.txt
+  ```
 
 # Use
 ## Convert videos
